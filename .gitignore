@@ -43,3 +43,10 @@ npm-debug.log
 
 # Logs
 *.log
+
+# embeddings / local data
+/priv/data/
+/priv/embeddings/
+
+# dev artifacts
+*.beam
