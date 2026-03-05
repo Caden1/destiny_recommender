@@ -22,7 +22,8 @@ end
 
 config :destiny_recommender, DestinyRecommender.OpenAI,
   api_key: System.get_env("OPENAI_API_KEY"),
-  model: System.get_env("OPENAI_MODEL") || "gpt-5.2"
+  model: System.get_env("OPENAI_MODEL") || "gpt-5.2",
+  embedding_model: System.get_env("OPENAI_EMBEDDING_MODEL") || "text-embedding-3-small"
 
 if config_env() == :prod do
   database_url =

@@ -38,4 +38,50 @@ defmodule DestinyRecommender.OpenAI do
   defp config do
     Application.get_env(:destiny_recommender, __MODULE__, [])
   end
+
+  def embedding_model do
+    config()[:embedding_model] || "text-embedding-3-small"
+  end
+
+  # Returns {:ok, [float()]} for a single text
+  def create_embedding(text) when is_binary(text) do
+    with {:ok, [vec]} <- create_embeddings([text]) do
+      {:ok, vec}
+    end
+  end
+
+  # Returns {:ok, [[float()]]} for multiple texts in one request
+  def create_embeddings(texts) when is_list(texts) do
+    with {:ok, api_key} <- fetch_api_key() do
+      req =
+        Req.new(
+          base_url: @base_url,
+          headers: [
+            {"authorization", "Bearer #{api_key}"},
+            {"content-type", "application/json"}
+          ]
+        )
+
+      payload = %{
+        "model" => embedding_model(),
+        "input" => texts
+      }
+
+      case Req.post(req, url: "/embeddings", json: payload) do
+        {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
+          vectors =
+            data
+            |> Enum.sort_by(& &1["index"])
+            |> Enum.map(& &1["embedding"])
+
+          {:ok, vectors}
+
+        {:ok, %{status: status, body: body}} ->
+          {:error, {:openai_http_error, status, body}}
+
+        {:error, reason} ->
+          {:error, {:openai_req_error, reason}}
+      end
+    end
+  end
 end
