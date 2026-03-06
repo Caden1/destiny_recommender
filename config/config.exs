@@ -31,6 +31,8 @@ config :destiny_recommender, DestinyRecommenderWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :destiny_recommender, DestinyRecommender.Mailer, adapter: Swoosh.Adapters.Local
 
+config :destiny_recommender, DestinyRecommender.Repo, types: DestinyRecommender.PostgrexTypes
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
