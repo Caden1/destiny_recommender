@@ -1,9 +1,7 @@
 defmodule DestinyRecommender.Recommendations.AIRecommender do
-  @moduledoc """
-  Uses “context engineering” by sending a small, relevant candidate set for the chosen (class, activity).
-  The output is constrained via JSON Schema with enums, so the model must select from the exact IDs.
-  """
+  @moduledoc false
 
+  alias DestinyRecommender.Recommendations.Notes
   alias DestinyRecommender.OpenAI
   alias DestinyRecommender.Recommendations.{Catalog, Recommendation}
   @ascii_text_pattern "^[\\x09\\x0A\\x0D\\x20-\\x7E]+$"
@@ -11,6 +9,12 @@ defmodule DestinyRecommender.Recommendations.AIRecommender do
   def recommend(class, activity) do
     weapons = Catalog.weapons_for(activity)
     armors = Catalog.armors_for(class, activity)
+
+    note_bullets =
+      case Notes.retrieve_note_bullets(class, activity, 5) do
+        {:ok, bullets} -> bullets
+        {:error, _} -> []
+      end
 
     weapon_ids = Enum.map(weapons, & &1.id)
     armor_ids = Enum.map(armors, & &1.id)
@@ -29,7 +33,15 @@ defmodule DestinyRecommender.Recommendations.AIRecommender do
         %{
           "role" => "user",
           "content" =>
-            user_prompt(class, activity, weapons, armors, why_max_length, tip_max_length)
+            user_prompt(
+              class,
+              activity,
+              weapons,
+              armors,
+              why_max_length,
+              tip_max_length,
+              note_bullets
+            )
         }
       ],
       "text" => %{
@@ -65,10 +77,11 @@ defmodule DestinyRecommender.Recommendations.AIRecommender do
     - Do not invent items.
     - Use English only. Do not include non-English scripts.
     - Output MUST match the JSON schema exactly.
+    - If retrieved notes mention items not in candidates, ignore those item names.
     """
   end
 
-  defp user_prompt(class, activity, weapons, armors, why_max_length, tip_max_length) do
+  defp user_prompt(class, activity, weapons, armors, why_max_length, tip_max_length, note_bullets) do
     goal =
       case activity do
         "Crucible" ->
@@ -76,6 +89,12 @@ defmodule DestinyRecommender.Recommendations.AIRecommender do
 
         "Strike" ->
           "Fastest solo clear. Favor add clear + boss damage + survivability."
+      end
+
+    retrieved_notes =
+      case note_bullets do
+        [] -> "None."
+        bullets -> bullets |> Enum.map(&("- " <> &1)) |> Enum.join("\n")
       end
 
     """
@@ -90,6 +109,9 @@ defmodule DestinyRecommender.Recommendations.AIRecommender do
 
     Armor candidates (must match class):
     #{format_candidates(armors)}
+
+    Retrieved build notes (short bullets; use for playstyle guidance, not item names):
+    #{retrieved_notes}
 
     Pick the best 1 weapon + 1 armor combo and provide a short reason + a few actionable tips.
     Keep "why" at #{why_max_length} characters or fewer.
