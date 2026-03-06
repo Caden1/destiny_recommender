@@ -25,6 +25,12 @@ config :destiny_recommender, DestinyRecommender.OpenAI,
   model: System.get_env("OPENAI_MODEL") || "gpt-5.2",
   embedding_model: System.get_env("OPENAI_EMBEDDING_MODEL") || "text-embedding-3-small"
 
+config :destiny_recommender, DestinyRecommender.Bungie,
+  api_key: System.get_env("BUNGIE_API_KEY"),
+  locale: System.get_env("BUNGIE_MANIFEST_LOCALE") || "en",
+  platform_url: System.get_env("BUNGIE_PLATFORM_URL") || "https://www.bungie.net/Platform",
+  content_url: System.get_env("BUNGIE_CONTENT_URL") || "https://www.bungie.net"
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

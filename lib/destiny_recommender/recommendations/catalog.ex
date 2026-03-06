@@ -1,12 +1,19 @@
 defmodule DestinyRecommender.Recommendations.Catalog do
   @moduledoc false
 
+  import Ecto.Query
+
+  alias DestinyRecommender.Repo
+
+  alias DestinyRecommender.Recommendations.{
+    CatalogItem,
+    CatalogRanking
+  }
+
   @classes ~w(Warlock Titan Hunter)
   @activities ~w(Crucible Strike)
 
-  # Note: Replace/expand these as you refine the sandbox/meta.
   @weapons [
-    # Crucible-leaning
     %{
       id: "ace_of_spades",
       name: "Ace of Spades",
@@ -38,8 +45,6 @@ defmodule DestinyRecommender.Recommendations.Catalog do
       activity: "Crucible",
       tags: ~w(close_range burst shutdown)
     },
-
-    # Strike-leaning
     %{
       id: "witherhoard",
       name: "Witherhoard",
@@ -74,7 +79,6 @@ defmodule DestinyRecommender.Recommendations.Catalog do
   ]
 
   @armors [
-    # Warlock
     %{
       id: "ophidian_aspect",
       name: "Ophidian Aspect",
@@ -117,8 +121,6 @@ defmodule DestinyRecommender.Recommendations.Catalog do
       activity: "Strike",
       tags: ~w(grenade uptime survivability)
     },
-
-    # Titan
     %{
       id: "one_eyed_mask",
       name: "One-Eyed Mask",
@@ -161,8 +163,6 @@ defmodule DestinyRecommender.Recommendations.Catalog do
       activity: "Strike",
       tags: ~w(boss_damage burst)
     },
-
-    # Hunter
     %{
       id: "st0mp_ee5",
       name: "St0mp-EE5",
@@ -213,14 +213,59 @@ defmodule DestinyRecommender.Recommendations.Catalog do
   def valid_class?(c), do: c in @classes
   def valid_activity?(a), do: a in @activities
 
-  def weapons_for(activity) when activity in @activities do
-    Enum.filter(@weapons, &(&1.activity == activity))
+  def weapons_for(class, activity) when class in @classes and activity in @activities do
+    case db_ranked_items(class, activity, "weapon") do
+      [] -> Enum.filter(@weapons, &(&1.activity == activity))
+      items -> items
+    end
   end
 
   def armors_for(class, activity) when class in @classes and activity in @activities do
-    Enum.filter(@armors, &(&1.class == class and &1.activity == activity))
+    case db_ranked_items(class, activity, "armor") do
+      [] -> Enum.filter(@armors, &(&1.class == class and &1.activity == activity))
+      items -> items
+    end
   end
 
-  def weapon_by_id(id), do: Enum.find(@weapons, &(&1.id == id))
-  def armor_by_id(id), do: Enum.find(@armors, &(&1.id == id))
+  def weapon_by_id(id) when is_binary(id) do
+    case Repo.get_by(CatalogItem, slug: id, slot: "weapon") do
+      nil -> Enum.find(@weapons, &(&1.id == id))
+      item -> to_public_item(item)
+    end
+  end
+
+  def armor_by_id(id) when is_binary(id) do
+    case Repo.get_by(CatalogItem, slug: id, slot: "armor") do
+      nil -> Enum.find(@armors, &(&1.id == id))
+      item -> to_public_item(item)
+    end
+  end
+
+  def default_weapons, do: @weapons
+  def default_armors, do: @armors
+
+  defp db_ranked_items(class, activity, slot) do
+    CatalogRanking
+    |> join(:inner, [r], i in CatalogItem, on: i.id == r.catalog_item_id)
+    |> where([r, i], r.class == ^class and r.activity == ^activity and r.slot == ^slot)
+    |> where([r, i], i.review_state == "ready")
+    |> order_by([r, _i], asc: r.rank)
+    |> select([_r, i], i)
+    |> Repo.all()
+    |> Enum.map(&to_public_item/1)
+  end
+
+  defp to_public_item(%CatalogItem{} = item) do
+    %{
+      id: item.slug,
+      name: item.name,
+      class: item.class,
+      tags: item.tags || [],
+      item_type_display_name: item.item_type_display_name,
+      tier_name: item.tier_name,
+      meta_notes: item.meta_notes || "",
+      source: item.source,
+      review_state: item.review_state
+    }
+  end
 end

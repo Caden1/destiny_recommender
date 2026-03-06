@@ -20,6 +20,12 @@ defmodule DestinyRecommenderWeb.Router do
     live("/", RecommenderLive, :index)
   end
 
+  scope "/admin", DestinyRecommenderWeb.Admin do
+    pipe_through(:browser)
+
+    live("/catalog", CatalogLive, :index)
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", DestinyRecommenderWeb do
   #   pipe_through :api
