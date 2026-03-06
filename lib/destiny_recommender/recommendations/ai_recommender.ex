@@ -7,7 +7,7 @@ defmodule DestinyRecommender.Recommendations.AIRecommender do
   @ascii_text_pattern "^[\\x09\\x0A\\x0D\\x20-\\x7E]+$"
 
   def recommend(class, activity) do
-    weapons = Catalog.weapons_for(activity)
+    weapons = Catalog.weapons_for(class, activity)
     armors = Catalog.armors_for(class, activity)
 
     note_bullets =

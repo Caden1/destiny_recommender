@@ -24,7 +24,9 @@ defmodule DestinyRecommender.Recommendations.Recommendation do
     |> validate_inclusion(:weapon_id, weapon_ids)
     |> validate_inclusion(:armor_id, armor_ids)
     |> validate_length(:why, max: @why_max_length)
-    |> validate_format(:why, @ascii_text_regex, message: "must contain only English ASCII characters")
+    |> validate_format(:why, @ascii_text_regex,
+      message: "must contain only English ASCII characters"
+    )
     |> validate_length(:playstyle_tips, min: 1, max: 6)
     |> validate_tip_lengths()
     |> validate_tip_characters()
