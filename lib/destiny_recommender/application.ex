@@ -10,6 +10,7 @@ defmodule DestinyRecommender.Application do
     children = [
       DestinyRecommenderWeb.Telemetry,
       DestinyRecommender.Repo,
+      {Oban, Application.fetch_env!(:destiny_recommender, Oban)},
       {DNSCluster,
        query: Application.get_env(:destiny_recommender, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: DestinyRecommender.PubSub},

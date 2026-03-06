@@ -20,6 +20,8 @@ config :destiny_recommender, DestinyRecommenderWeb.Endpoint,
   secret_key_base: "i+nGXlKdPsD85maFIga8NkPXAo9G9RFF6z9lnp+Q0B1JYRzk7M+6ODbiIH12Ahly",
   server: false
 
+config :destiny_recommender, Oban, testing: :manual
+
 # In test we don't send emails
 config :destiny_recommender, DestinyRecommender.Mailer, adapter: Swoosh.Adapters.Test
 

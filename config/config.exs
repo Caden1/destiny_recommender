@@ -33,6 +33,23 @@ config :destiny_recommender, DestinyRecommender.Mailer, adapter: Swoosh.Adapters
 
 config :destiny_recommender, DestinyRecommender.Repo, types: DestinyRecommender.PostgrexTypes
 
+# Configure Oban for background job processing
+config :destiny_recommender, Oban,
+  engine: Oban.Engines.Basic,
+  repo: DestinyRecommender.Repo,
+  queues: [
+    manifest: 2,
+    curator: 2,
+    default: 5
+  ],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 */6 * * *", DestinyRecommender.Workers.ManifestPollWorker}
+     ]}
+  ]
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
