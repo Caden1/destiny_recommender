@@ -36,8 +36,6 @@ defmodule DestinyRecommender.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   # Specifies your project dependencies.
-  #
-  # Type `mix help deps` for examples and options.
   defp deps do
     [
       {:phoenix, "~> 1.8.1"},
@@ -72,16 +70,14 @@ defmodule DestinyRecommender.MixProject do
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
-  # For example, to install project dependencies and perform other setup tasks, run:
-  #
-  #     $ mix setup
-  #
-  # See the documentation for `Mix` for more info on aliases.
   defp aliases do
     [
       setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
+      # These aliases make the README commands a lot easier to remember.
+      "seed.catalog": ["run priv/repo/seeds_catalog_items.exs"],
+      "seed.notes": ["run priv/repo/seeds_build_notes.exs"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind destiny_recommender", "esbuild destiny_recommender"],

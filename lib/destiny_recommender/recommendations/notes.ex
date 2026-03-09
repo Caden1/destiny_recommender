@@ -1,37 +1,53 @@
 defmodule DestinyRecommender.Recommendations.Notes do
-  @moduledoc false
+  @moduledoc """
+  Small helper for retrieving short RAG note bullets.
+
+  The recommendation prompt never gets an unbounded blob of text. We only pull a
+  handful of short bullets, and we skip the embedding call entirely when there are
+  no notes for the current class/activity.
+  """
 
   import Ecto.Query
   import Pgvector.Ecto.Query
 
-  alias DestinyRecommender.Repo
-  alias DestinyRecommender.OpenAI
   alias DestinyRecommender.Recommendations.BuildNote
+  alias DestinyRecommender.Repo
 
   @max_notes 5
   @max_bullet_chars 220
 
-  # Public: returns list of short bullet strings for prompt injection
   def retrieve_note_bullets(class, activity, limit \\ 5) do
-    limit = min(limit, @max_notes)
+    limit = limit |> min(@max_notes) |> max(1)
 
-    query_text =
-      case activity do
-        "Crucible" ->
-          "Destiny 2 solo #{class} Crucible: maximize kills. Reliable duels, positioning, survivability."
+    if any_notes_for?(class, activity) do
+      query_text =
+        case activity do
+          "Crucible" ->
+            "Destiny 2 solo #{class} Crucible: maximize kills. Reliable duels, positioning, survivability."
 
-        "Strike" ->
-          "Destiny 2 solo #{class} Strike: fastest clear. Add clear, boss damage, survivability, tempo."
+          "Strike" ->
+            "Destiny 2 solo #{class} Strike: fastest clear. Add clear, boss damage, survivability, tempo."
+        end
+
+      with {:ok, notes} <- semantic_search(class, activity, query_text, limit) do
+        {:ok, Enum.map(notes, &to_prompt_bullet/1)}
       end
-
-    with {:ok, notes} <- semantic_search(class, activity, query_text, limit) do
-      {:ok, Enum.map(notes, &to_prompt_bullet/1)}
+    else
+      {:ok, []}
     end
   end
 
-  # Internal: vector search in Postgres
+  def any_notes_for?(class, activity) do
+    BuildNote
+    |> where([n], n.class == "Any" or n.class == ^class)
+    |> where([n], n.activity == "Any" or n.activity == ^activity)
+    |> select([_n], 1)
+    |> limit(1)
+    |> Repo.exists?()
+  end
+
   def semantic_search(class, activity, query_text, limit) do
-    with {:ok, embedding} <- OpenAI.create_embedding(query_text) do
+    with {:ok, embedding} <- openai_client().create_embedding(query_text) do
       qvec = Pgvector.new(embedding)
 
       notes =
@@ -62,5 +78,9 @@ defmodule DestinyRecommender.Recommendations.Notes do
     else
       bullet
     end
+  end
+
+  defp openai_client do
+    Application.get_env(:destiny_recommender, :openai_client, DestinyRecommender.OpenAI)
   end
 end

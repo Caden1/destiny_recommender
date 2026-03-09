@@ -1,16 +1,21 @@
 defmodule DestinyRecommender.Workers.CuratorProposalWorker do
+  @moduledoc """
+  Offline worker that asks the curator model to rank a reviewed candidate pool.
+
+  Important boundaries:
+
+    * only `ready` catalog items are eligible
+    * candidates must be tagged for the requested activity
+    * when a manifest version is supplied, seed rows are excluded so v3 uses the
+      manifest-backed catalog instead of mixing old MVP fallback data
+  """
+
   use Oban.Worker, queue: :curator, max_attempts: 3
 
   import Ecto.Query
 
+  alias DestinyRecommender.Recommendations.{CatalogItem, CatalogProposal, Notes}
   alias DestinyRecommender.Repo
-
-  alias DestinyRecommender.Recommendations.{
-    CatalogItem,
-    CatalogProposal,
-    CuratorAI,
-    Notes
-  }
 
   @classes ~w(Warlock Titan Hunter)
   @activities ~w(Crucible Strike)
@@ -24,10 +29,17 @@ defmodule DestinyRecommender.Workers.CuratorProposalWorker do
     manifest_version = Map.get(args, "manifest_version")
 
     with :ok <- validate_combo(class, activity),
-         {:ok, weapon_candidates, armor_candidates} <- load_reviewed_candidates(class, activity),
+         {:ok, weapon_candidates, armor_candidates} <-
+           load_reviewed_candidates(class, activity, manifest_version),
          {:ok, note_bullets} <- load_note_bullets(class, activity),
          {:ok, ai_result} <-
-           call_curator_ai(class, activity, weapon_candidates, armor_candidates, note_bullets),
+           curator_ai_module().curate(
+             class,
+             activity,
+             format_candidates(weapon_candidates),
+             format_candidates(armor_candidates),
+             note_bullets
+           ),
          {:ok, _proposal} <-
            store_catalog_proposal(
              manifest_version,
@@ -53,46 +65,48 @@ defmodule DestinyRecommender.Workers.CuratorProposalWorker do
     end
   end
 
-  defp load_reviewed_candidates(class, activity) do
-    weapons =
+  defp load_reviewed_candidates(class, activity, manifest_version) do
+    base_query =
       CatalogItem
-      |> where([i], i.review_state == "ready")
-      |> where([i], i.slot == "weapon")
-      |> order_by([i], asc: i.name)
+      |> where([item], item.review_state == "ready")
+      |> where([item], fragment("? = ANY(?)", ^activity, item.recommended_activities))
+      |> maybe_scope_to_manifest_version(manifest_version)
+
+    weapons =
+      base_query
+      |> where([item], item.slot == "weapon")
+      |> order_by([item], asc: item.name)
       |> limit(^@max_weapon_candidates)
       |> Repo.all()
 
     armors =
-      CatalogItem
-      |> where([i], i.review_state == "ready")
-      |> where([i], i.slot == "armor")
-      |> where([i], i.class == ^class)
-      |> order_by([i], asc: i.name)
+      base_query
+      |> where([item], item.slot == "armor")
+      |> where([item], item.class == ^class or item.class == "Any")
+      |> order_by([item], asc: item.name)
       |> limit(^@max_armor_candidates)
       |> Repo.all()
 
     cond do
-      weapons == [] -> {:error, {:no_weapon_candidates, class, activity}}
-      armors == [] -> {:error, {:no_armor_candidates, class, activity}}
+      weapons == [] -> {:error, {:no_weapon_candidates, class, activity, manifest_version}}
+      armors == [] -> {:error, {:no_armor_candidates, class, activity, manifest_version}}
       true -> {:ok, weapons, armors}
     end
   end
+
+  defp maybe_scope_to_manifest_version(query, manifest_version) when is_binary(manifest_version) do
+    query
+    |> where([item], item.source != "seed")
+    |> where([item], item.manifest_version == ^manifest_version or item.source == "manual")
+  end
+
+  defp maybe_scope_to_manifest_version(query, _manifest_version), do: query
 
   defp load_note_bullets(class, activity) do
     case Notes.retrieve_note_bullets(class, activity, @notes_limit) do
       {:ok, bullets} -> {:ok, bullets}
       {:error, _reason} -> {:ok, []}
     end
-  end
-
-  defp call_curator_ai(class, activity, weapon_candidates, armor_candidates, note_bullets) do
-    CuratorAI.curate(
-      class,
-      activity,
-      format_candidates(weapon_candidates),
-      format_candidates(armor_candidates),
-      note_bullets
-    )
   end
 
   defp store_catalog_proposal(
@@ -130,20 +144,11 @@ defmodule DestinyRecommender.Workers.CuratorProposalWorker do
 
   defp validate_slugs(slugs, allowed_set, field) when is_list(slugs) do
     cond do
-      slugs == [] ->
-        {:error, {field, :empty}}
-
-      Enum.any?(slugs, &(not is_binary(&1))) ->
-        {:error, {field, :non_string_slug}}
-
-      Enum.uniq(slugs) != slugs ->
-        {:error, {field, :duplicate_slugs}}
-
-      Enum.any?(slugs, &(not MapSet.member?(allowed_set, &1))) ->
-        {:error, {field, :unknown_slug}}
-
-      true ->
-        :ok
+      slugs == [] -> {:error, {field, :empty}}
+      Enum.any?(slugs, &(not is_binary(&1))) -> {:error, {field, :non_string_slug}}
+      Enum.uniq(slugs) != slugs -> {:error, {field, :duplicate_slugs}}
+      Enum.any?(slugs, &(not MapSet.member?(allowed_set, &1))) -> {:error, {field, :unknown_slug}}
+      true -> :ok
     end
   end
 
@@ -158,8 +163,17 @@ defmodule DestinyRecommender.Workers.CuratorProposalWorker do
         "class" => item.class,
         "item_type_display_name" => item.item_type_display_name,
         "tags" => item.tags,
-        "meta_notes" => item.meta_notes
+        "meta_notes" => item.meta_notes,
+        "review_state" => item.review_state
       }
     end)
+  end
+
+  defp curator_ai_module do
+    Application.get_env(
+      :destiny_recommender,
+      :curator_ai_module,
+      DestinyRecommender.Recommendations.CuratorAI
+    )
   end
 end

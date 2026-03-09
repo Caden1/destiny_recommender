@@ -1,7 +1,11 @@
 defmodule DestinyRecommender.Recommendations.CuratorAI do
-  @moduledoc false
+  @moduledoc """
+  Offline curator model wrapper used by the slow, human-reviewed v3 pipeline.
 
-  alias DestinyRecommender.OpenAI
+  Unlike the online recommender, this path can rank a larger reviewed candidate
+  pool and produce a proposal for admin approval. The output is still tightly
+  schema-constrained and slug-validated before anything is stored.
+  """
 
   @max_weapons 30
   @max_armors 15
@@ -22,7 +26,7 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
          bounded_notes <- bound_notes(note_bullets, @max_notes),
          {:ok, payload} <-
            build_payload(class, activity, bounded_weapons, bounded_armors, bounded_notes),
-         {:ok, body} <- OpenAI.create_response(payload),
+         {:ok, body} <- openai_client().create_response(payload),
          {:ok, attrs} <- decode_output_json(body),
          :ok <- validate_response(attrs, bounded_weapons, bounded_armors) do
       {:ok, attrs}
@@ -35,20 +39,11 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
 
   defp validate_inputs(class, activity, weapon_candidates, armor_candidates) do
     cond do
-      class not in @classes ->
-        {:error, {:invalid_class, class}}
-
-      activity not in @activities ->
-        {:error, {:invalid_activity, activity}}
-
-      weapon_candidates == [] ->
-        {:error, :no_weapon_candidates}
-
-      armor_candidates == [] ->
-        {:error, :no_armor_candidates}
-
-      true ->
-        :ok
+      class not in @classes -> {:error, {:invalid_class, class}}
+      activity not in @activities -> {:error, {:invalid_activity, activity}}
+      weapon_candidates == [] -> {:error, :no_weapon_candidates}
+      armor_candidates == [] -> {:error, :no_armor_candidates}
+      true -> :ok
     end
   end
 
@@ -65,7 +60,7 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
       schema = json_schema(weapon_slugs, armor_slugs, weapon_count, armor_count)
 
       payload = %{
-        "model" => OpenAI.model(),
+        "model" => openai_client().model(),
         "input" => [
           %{
             "role" => "system",
@@ -224,7 +219,7 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
       output
       |> Enum.flat_map(&(&1["content"] || []))
       |> Enum.find_value(fn
-        %{"type" => "output_text", "text" => t} when is_binary(t) -> t
+        %{"type" => "output_text", "text" => text} when is_binary(text) -> text
         _ -> nil
       end)
 
@@ -234,11 +229,7 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
   defp decode_output_json(_), do: {:error, :unexpected_openai_response_shape}
 
   defp validate_response(
-         %{
-           "weapon_slugs" => weapon_slugs,
-           "armor_slugs" => armor_slugs,
-           "summary" => summary
-         },
+         %{"weapon_slugs" => weapon_slugs, "armor_slugs" => armor_slugs, "summary" => summary},
          weapon_candidates,
          armor_candidates
        ) do
@@ -246,32 +237,15 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
     allowed_armor_slugs = MapSet.new(Enum.map(armor_candidates, & &1["slug"]))
 
     cond do
-      not is_list(weapon_slugs) ->
-        {:error, {:invalid_response_field, :weapon_slugs}}
-
-      not is_list(armor_slugs) ->
-        {:error, {:invalid_response_field, :armor_slugs}}
-
-      not is_binary(summary) ->
-        {:error, {:invalid_response_field, :summary}}
-
-      String.length(summary) > @max_summary_length ->
-        {:error, {:summary_too_long, String.length(summary)}}
-
-      Enum.uniq(weapon_slugs) != weapon_slugs ->
-        {:error, :duplicate_weapon_slugs}
-
-      Enum.uniq(armor_slugs) != armor_slugs ->
-        {:error, :duplicate_armor_slugs}
-
-      Enum.any?(weapon_slugs, &(not MapSet.member?(allowed_weapon_slugs, &1))) ->
-        {:error, :unknown_weapon_slug}
-
-      Enum.any?(armor_slugs, &(not MapSet.member?(allowed_armor_slugs, &1))) ->
-        {:error, :unknown_armor_slug}
-
-      true ->
-        :ok
+      not is_list(weapon_slugs) -> {:error, {:invalid_response_field, :weapon_slugs}}
+      not is_list(armor_slugs) -> {:error, {:invalid_response_field, :armor_slugs}}
+      not is_binary(summary) -> {:error, {:invalid_response_field, :summary}}
+      String.length(summary) > @max_summary_length -> {:error, {:summary_too_long, String.length(summary)}}
+      Enum.uniq(weapon_slugs) != weapon_slugs -> {:error, :duplicate_weapon_slugs}
+      Enum.uniq(armor_slugs) != armor_slugs -> {:error, :duplicate_armor_slugs}
+      Enum.any?(weapon_slugs, &(not MapSet.member?(allowed_weapon_slugs, &1))) -> {:error, :unknown_weapon_slug}
+      Enum.any?(armor_slugs, &(not MapSet.member?(allowed_armor_slugs, &1))) -> {:error, :unknown_armor_slug}
+      true -> :ok
     end
   end
 
@@ -288,10 +262,7 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
 
   defp ready_candidate?(%{"review_state" => "ready"}), do: true
   defp ready_candidate?(%{"review_state" => _}), do: false
-
-  defp ready_candidate?(candidate) when is_map(candidate),
-    do: not Map.has_key?(candidate, "review_state")
-
+  defp ready_candidate?(candidate) when is_map(candidate), do: not Map.has_key?(candidate, "review_state")
   defp ready_candidate?(_), do: false
 
   defp compact_candidate(candidate) do
@@ -325,5 +296,9 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
     else
       trimmed
     end
+  end
+
+  defp openai_client do
+    Application.get_env(:destiny_recommender, :openai_client, DestinyRecommender.OpenAI)
   end
 end

@@ -4,14 +4,13 @@ defmodule DestinyRecommender.Workers.ManifestPollWorker do
     max_attempts: 3,
     unique: [period: 3600, fields: [:worker, :args]]
 
-  alias DestinyRecommender.Bungie
-  alias DestinyRecommender.Repo
   alias DestinyRecommender.Recommendations.ManifestSnapshot
+  alias DestinyRecommender.Repo
   alias DestinyRecommender.Workers.ManifestSyncWorker
 
   @impl true
   def perform(_job) do
-    with {:ok, %{"Response" => response}} <- Bungie.get_manifest(),
+    with {:ok, %{"Response" => response}} <- bungie_client().get_manifest(),
          version when is_binary(version) <- response["version"],
          path when is_binary(path) <-
            get_in(response, [
@@ -40,5 +39,9 @@ defmodule DestinyRecommender.Workers.ManifestPollWorker do
     else
       _ -> {:error, :manifest_poll_failed}
     end
+  end
+
+  defp bungie_client do
+    Application.get_env(:destiny_recommender, :bungie_client, DestinyRecommender.Bungie)
   end
 end

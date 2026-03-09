@@ -1,8 +1,14 @@
 defmodule DestinyRecommender.Recommendations.ManifestImporter do
-  @moduledoc false
+  @moduledoc """
+  Imports a filtered slice of the Bungie manifest into `catalog_items`.
 
-  alias DestinyRecommender.Repo
+  Manifest data is treated as canonical for item identity, but we preserve the
+  human-authored fields that live on top of it (`tags`, `meta_notes`, review
+  state, and recommended activities).
+  """
+
   alias DestinyRecommender.Recommendations.CatalogItem
+  alias DestinyRecommender.Repo
 
   def import_inventory_items!(items_map, manifest_version) when is_map(items_map) do
     items_map
@@ -53,7 +59,6 @@ defmodule DestinyRecommender.Recommendations.ManifestImporter do
           item_type_display_name: item["itemTypeDisplayName"],
           tier_name: tier_name,
           source: "manifest",
-          review_state: "needs_review",
           manifest_version: manifest_version,
           raw: item
         }
@@ -61,43 +66,63 @@ defmodule DestinyRecommender.Recommendations.ManifestImporter do
   end
 
   defp upsert_item!(attrs) do
-    now = DateTime.utc_now()
+    existing_item = Repo.get_by(CatalogItem, bungie_hash: attrs.bungie_hash) || Repo.get_by(CatalogItem, slug: attrs.slug)
 
-    Repo.insert!(
-      %CatalogItem{
-        slug: attrs.slug,
-        bungie_hash: attrs.bungie_hash,
-        name: attrs.name,
-        slot: attrs.slot,
-        class: attrs.class,
-        item_type_display_name: attrs.item_type_display_name,
-        tier_name: attrs.tier_name,
-        source: attrs.source,
-        review_state: attrs.review_state,
-        manifest_version: attrs.manifest_version,
-        raw: attrs.raw,
-        inserted_at: now,
-        updated_at: now
-      },
-      on_conflict: [
-        set: [
-          name: attrs.name,
-          slot: attrs.slot,
-          class: attrs.class,
-          item_type_display_name: attrs.item_type_display_name,
-          tier_name: attrs.tier_name,
-          manifest_version: attrs.manifest_version,
-          raw: attrs.raw,
-          updated_at: now
-        ]
-      ],
-      conflict_target: :bungie_hash
-    )
+    case existing_item do
+      nil ->
+        insert_new_item!(attrs)
+
+      %CatalogItem{} = item ->
+        update_existing_item!(item, attrs)
+    end
+  end
+
+  defp insert_new_item!(attrs) do
+    %CatalogItem{}
+    |> CatalogItem.changeset(%{
+      slug: attrs.slug,
+      bungie_hash: attrs.bungie_hash,
+      name: attrs.name,
+      slot: attrs.slot,
+      class: attrs.class,
+      item_type_display_name: attrs.item_type_display_name,
+      tier_name: attrs.tier_name,
+      source: attrs.source,
+      review_state: "needs_review",
+      recommended_activities: [],
+      manifest_version: attrs.manifest_version,
+      raw: attrs.raw
+    })
+    |> Repo.insert!()
+  end
+
+  defp update_existing_item!(item, attrs) do
+    # Human-curated data is preserved on update. The manifest refresh should not
+    # erase tags, notes, review state, or activity suitability.
+    item
+    |> CatalogItem.changeset(%{
+      slug: attrs.slug,
+      bungie_hash: attrs.bungie_hash,
+      name: attrs.name,
+      slot: attrs.slot,
+      class: attrs.class,
+      item_type_display_name: attrs.item_type_display_name,
+      tier_name: attrs.tier_name,
+      source: "manifest",
+      manifest_version: attrs.manifest_version,
+      raw: attrs.raw,
+      tags: item.tags,
+      recommended_activities: item.recommended_activities,
+      meta_notes: item.meta_notes,
+      review_state: item.review_state
+    })
+    |> Repo.update!()
   end
 
   defp slugify(name) do
     name
     |> String.downcase()
+    |> String.replace("'", "")
     |> String.replace(~r/[^a-z0-9]+/u, "_")
     |> String.trim("_")
   end

@@ -4,46 +4,62 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
   import Ecto.Query
 
   alias Ecto.Multi
+  alias DestinyRecommender.Recommendations.{Catalog, CatalogItem, CatalogProposal, CatalogRanking, Curation}
   alias DestinyRecommender.Repo
-
-  alias DestinyRecommender.Recommendations.{
-    CatalogItem,
-    CatalogProposal,
-    CatalogRanking
-  }
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, load_data(socket)}
+    {:ok,
+     socket
+     |> assign(:page_title, "Catalog Admin")
+     |> assign(:activity_options, Catalog.activities())
+     |> load_data()}
+  end
+
+  @impl true
+  def handle_event("generate_proposals", _params, socket) do
+    case Curation.enqueue_curator_proposals() do
+      {:ok, %{count: count, manifest_version: manifest_version}} ->
+        manifest_label = manifest_version || "local seed/manual catalog"
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Enqueued #{count} curator job(s) using #{manifest_label}.")
+         |> load_data()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not enqueue curator jobs: #{inspect(reason)}")}
+    end
   end
 
   @impl true
   def handle_event("save_item", params, socket) do
-    id = parse_int(params["id"])
-    tags = parse_tags(params["tags"])
-    meta_notes = String.trim(params["meta_notes"] || "")
+    with {:ok, id} <- parse_int(params["id"] || params["_id"]),
+         %CatalogItem{} = item <- Repo.get(CatalogItem, id),
+         tags <- parse_tags(params["tags"]),
+         recommended_activities <- parse_activities(params["recommended_activities"]),
+         meta_notes <- String.trim(params["meta_notes"] || ""),
+         {:ok, _item} <-
+           item
+           |> CatalogItem.changeset(%{
+             tags: tags,
+             recommended_activities: recommended_activities,
+             meta_notes: meta_notes
+           })
+           |> Repo.update() do
+      {:noreply,
+       socket
+       |> put_flash(:info, "Item updated.")
+       |> load_data()}
+    else
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid item id.")}
 
-    result =
-      with %CatalogItem{} = item <- Repo.get(CatalogItem, id),
-           {:ok, _item} <-
-             item
-             |> CatalogItem.changeset(%{tags: tags, meta_notes: meta_notes})
-             |> Repo.update() do
-        :ok
-      else
-        nil -> {:error, :item_not_found}
-        {:error, changeset} -> {:error, changeset}
-      end
+      nil ->
+        {:noreply, put_flash(socket, :error, "Item not found.")}
 
-    case result do
-      :ok ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Item updated.")
-         |> load_data()}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Could not save item.")}
+      {:error, changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not save item: #{inspect(changeset.errors)}")}
     end
   end
 
@@ -59,228 +75,277 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
 
   @impl true
   def handle_event("approve_proposal", %{"id" => id}, socket) do
-    proposal =
-      CatalogProposal
-      |> Repo.get(id)
+    with {:ok, proposal_id} <- parse_int(id),
+         %CatalogProposal{} = proposal <- Repo.get(CatalogProposal, proposal_id) do
+      case approve_proposal(proposal) do
+        {:ok, _result} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Proposal approved and rankings published.")
+           |> load_data()}
 
-    case proposal do
+        {:error, _step, _reason, _changes} ->
+          {:noreply, put_flash(socket, :error, "Could not approve proposal.")}
+
+        {:error, reason} ->
+          {:noreply,
+           put_flash(socket, :error, "Could not approve proposal: #{inspect(reason)}")}
+      end
+    else
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid proposal id.")}
+
       nil ->
         {:noreply, put_flash(socket, :error, "Proposal not found.")}
-
-      %CatalogProposal{} = proposal ->
-        case approve_proposal(proposal) do
-          {:ok, _result} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Proposal approved and rankings published.")
-             |> load_data()}
-
-          {:error, _step, _reason, _changes} ->
-            {:noreply, put_flash(socket, :error, "Could not approve proposal.")}
-        end
     end
   end
 
   @impl true
   def handle_event("reject_proposal", %{"id" => id}, socket) do
-    case Repo.get(CatalogProposal, id) do
+    with {:ok, proposal_id} <- parse_int(id),
+         %CatalogProposal{} = proposal <- Repo.get(CatalogProposal, proposal_id) do
+      case proposal
+           |> CatalogProposal.changeset(%{
+             status: "rejected",
+             rejected_at: DateTime.utc_now(),
+             approved_at: nil
+           })
+           |> Repo.update() do
+        {:ok, _proposal} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Proposal rejected.")
+           |> load_data()}
+
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Could not reject proposal.")}
+      end
+    else
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid proposal id.")}
+
       nil ->
         {:noreply, put_flash(socket, :error, "Proposal not found.")}
-
-      %CatalogProposal{} = proposal ->
-        case proposal
-             |> CatalogProposal.changeset(%{
-               status: "rejected",
-               rejected_at: DateTime.utc_now(),
-               approved_at: nil
-             })
-             |> Repo.update() do
-          {:ok, _proposal} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Proposal rejected.")
-             |> load_data()}
-
-          {:error, _changeset} ->
-            {:noreply, put_flash(socket, :error, "Could not reject proposal.")}
-        end
     end
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="mx-auto max-w-7xl p-6 space-y-10">
-      <.header>
-        Catalog Admin
-        <:subtitle>Review imported items and approve pending catalog proposals.</:subtitle>
-      </.header>
+    <Layouts.app flash={@flash}>
+      <div class="mx-auto max-w-7xl space-y-10">
+        <.header>
+          Catalog Admin
+          <:subtitle>
+            Review manifest items, label activity suitability, and approve curator-generated ranking proposals.
+          </:subtitle>
+        </.header>
 
-      <section class="space-y-4">
-        <div>
-          <h2 class="text-xl font-semibold">Items needing review</h2>
-          <p class="text-sm text-zinc-600">
-            Review tags and notes, then mark items ready or archive them.
+        <section class="rounded-xl border p-5 shadow-sm space-y-3">
+          <h2 class="text-xl font-semibold">Offline curation</h2>
+          <p class="text-sm text-zinc-700">
+            Latest synced manifest version:
+            <span class="font-mono">{@current_manifest_version || "none yet"}</span>
           </p>
-        </div>
-
-        <%= if @items_needing_review == [] do %>
-          <div class="rounded-lg border p-4 text-sm text-zinc-600">
-            No items currently need review.
+          <p class="text-sm text-zinc-600">
+            Proposal generation is manual on purpose. Review items first, then enqueue curator jobs.
+          </p>
+          <div>
+            <button
+              type="button"
+              phx-click="generate_proposals"
+              class="rounded-md bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
+            >
+              Generate proposals from reviewed catalog
+            </button>
           </div>
-        <% else %>
-          <div class="space-y-4">
-            <%= for item <- @items_needing_review do %>
-              <div class="rounded-xl border p-5 shadow-sm">
-                <div class="mb-4 space-y-1">
-                  <h3 class="text-lg font-semibold">{item.name}</h3>
-                  <div class="text-sm text-zinc-600">
-                    <span><strong>Slot:</strong> {item.slot}</span>
-                    <span class="mx-2">•</span>
-                    <span><strong>Class:</strong> {item.class}</span>
-                    <span class="mx-2">•</span>
-                    <span><strong>Item type:</strong> {item.item_type_display_name || "—"}</span>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold">Items needing review</h2>
+            <p class="text-sm text-zinc-600">
+              Add tags, write short meta notes, set the activity suitability, then mark the item ready.
+            </p>
+          </div>
+
+          <%= if @items_needing_review == [] do %>
+            <div class="rounded-lg border p-4 text-sm text-zinc-600">
+              No items currently need review.
+            </div>
+          <% else %>
+            <div class="space-y-4">
+              <%= for item <- @items_needing_review do %>
+                <div class="rounded-xl border p-5 shadow-sm">
+                  <div class="mb-4 space-y-1">
+                    <h3 class="text-lg font-semibold">{item.name}</h3>
+                    <div class="text-sm text-zinc-600 flex flex-wrap gap-2">
+                      <span><strong>Slot:</strong> {item.slot}</span>
+                      <span>•</span>
+                      <span><strong>Class:</strong> {item.class}</span>
+                      <span>•</span>
+                      <span><strong>Source:</strong> {item.source}</span>
+                      <span>•</span>
+                      <span><strong>Manifest:</strong> {item.manifest_version || "—"}</span>
+                    </div>
                   </div>
+
+                  <form
+                    id={"catalog-item-form-#{item.id}"}
+                    phx-submit="save_item"
+                    class="space-y-4"
+                  >
+                    <input type="hidden" name="id" value={item.id} />
+
+                    <div>
+                      <label class="mb-1 block text-sm font-medium">Current tags</label>
+                      <input
+                        type="text"
+                        name="tags"
+                        value={Enum.join(item.tags || [], ", ")}
+                        class="w-full rounded-md border px-3 py-2"
+                      />
+                      <p class="mt-1 text-xs text-zinc-500">Comma-separated tags.</p>
+                    </div>
+
+                    <div>
+                      <label class="mb-1 block text-sm font-medium">Recommended activities</label>
+                      <input
+                        type="text"
+                        name="recommended_activities"
+                        value={Enum.join(item.recommended_activities || [], ", ")}
+                        class="w-full rounded-md border px-3 py-2"
+                      />
+                      <p class="mt-1 text-xs text-zinc-500">
+                        Comma-separated values from: {Enum.join(@activity_options, ", ")}
+                      </p>
+                    </div>
+
+                    <div>
+                      <label class="mb-1 block text-sm font-medium">Meta notes</label>
+                      <textarea
+                        name="meta_notes"
+                        rows="4"
+                        class="w-full rounded-md border px-3 py-2"
+                      ><%= item.meta_notes %></textarea>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3">
+                      <button
+                        type="submit"
+                        class="rounded-md bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
+                      >
+                        Save tags/notes
+                      </button>
+
+                      <button
+                        type="button"
+                        phx-click="mark_ready"
+                        phx-value-id={item.id}
+                        class="rounded-md border px-4 py-2 hover:bg-zinc-50"
+                      >
+                        Mark ready
+                      </button>
+
+                      <button
+                        type="button"
+                        phx-click="archive_item"
+                        phx-value-id={item.id}
+                        class="rounded-md border px-4 py-2 hover:bg-zinc-50"
+                      >
+                        Archive
+                      </button>
+                    </div>
+                  </form>
                 </div>
+              <% end %>
+            </div>
+          <% end %>
+        </section>
 
-                <form phx-submit="save_item" class="space-y-4">
-                  <input type="hidden" name="_id" value={item.id} />
+        <section class="space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold">Pending proposals</h2>
+            <p class="text-sm text-zinc-600">
+              Approving a proposal publishes its rankings for that class and activity.
+            </p>
+          </div>
 
-                  <div>
-                    <label class="mb-1 block text-sm font-medium">Current tags</label>
-                    <input
-                      type="text"
-                      name="tags"
-                      value={Enum.join(item.tags || [], ", ")}
-                      class="w-full rounded-md border px-3 py-2"
-                    />
-                    <p class="mt-1 text-xs text-zinc-500">Comma-separated tags.</p>
+          <%= if @pending_proposals == [] do %>
+            <div class="rounded-lg border p-4 text-sm text-zinc-600">
+              No pending proposals.
+            </div>
+          <% else %>
+            <div class="space-y-4">
+              <%= for proposal <- @pending_proposals do %>
+                <div class="rounded-xl border p-5 shadow-sm">
+                  <div class="mb-4 space-y-1">
+                    <h3 class="text-lg font-semibold">
+                      {proposal.class} • {proposal.activity}
+                    </h3>
+                    <p class="text-sm text-zinc-700">{proposal.summary}</p>
                   </div>
 
-                  <div>
-                    <label class="mb-1 block text-sm font-medium">Meta notes</label>
-                    <textarea
-                      name="meta_notes"
-                      rows="4"
-                      class="w-full rounded-md border px-3 py-2"
-                    ><%= item.meta_notes %></textarea>
+                  <div class="grid gap-6 md:grid-cols-2">
+                    <div>
+                      <h4 class="mb-2 font-medium">Ranked weapons</h4>
+                      <ol class="list-decimal space-y-1 pl-5 text-sm">
+                        <%= for label <- proposal_labels(proposal.weapon_slugs, @item_name_by_slug) do %>
+                          <li>{label}</li>
+                        <% end %>
+                      </ol>
+                    </div>
+
+                    <div>
+                      <h4 class="mb-2 font-medium">Ranked armors</h4>
+                      <ol class="list-decimal space-y-1 pl-5 text-sm">
+                        <%= for label <- proposal_labels(proposal.armor_slugs, @item_name_by_slug) do %>
+                          <li>{label}</li>
+                        <% end %>
+                      </ol>
+                    </div>
                   </div>
 
-                  <div class="flex flex-wrap gap-3">
+                  <div class="mt-5 flex flex-wrap gap-3">
                     <button
-                      type="submit"
+                      type="button"
+                      phx-click="approve_proposal"
+                      phx-value-id={proposal.id}
                       class="rounded-md bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
                     >
-                      Save tags/notes
+                      Approve
                     </button>
 
                     <button
                       type="button"
-                      phx-click="mark_ready"
-                      phx-value-id={item.id}
+                      phx-click="reject_proposal"
+                      phx-value-id={proposal.id}
                       class="rounded-md border px-4 py-2 hover:bg-zinc-50"
                     >
-                      Mark ready
-                    </button>
-
-                    <button
-                      type="button"
-                      phx-click="archive_item"
-                      phx-value-id={item.id}
-                      class="rounded-md border px-4 py-2 hover:bg-zinc-50"
-                    >
-                      Archive
+                      Reject
                     </button>
                   </div>
-                </form>
-              </div>
-            <% end %>
-          </div>
-        <% end %>
-      </section>
-
-      <section class="space-y-4">
-        <div>
-          <h2 class="text-xl font-semibold">Pending proposals</h2>
-          <p class="text-sm text-zinc-600">
-            Approving a proposal publishes its rankings for that class and activity.
-          </p>
-        </div>
-
-        <%= if @pending_proposals == [] do %>
-          <div class="rounded-lg border p-4 text-sm text-zinc-600">
-            No pending proposals.
-          </div>
-        <% else %>
-          <div class="space-y-4">
-            <%= for proposal <- @pending_proposals do %>
-              <div class="rounded-xl border p-5 shadow-sm">
-                <div class="mb-4 space-y-1">
-                  <h3 class="text-lg font-semibold">
-                    {proposal.class} • {proposal.activity}
-                  </h3>
-                  <p class="text-sm text-zinc-700">{proposal.summary}</p>
                 </div>
-
-                <div class="grid gap-6 md:grid-cols-2">
-                  <div>
-                    <h4 class="mb-2 font-medium">Ranked weapons</h4>
-                    <ol class="list-decimal space-y-1 pl-5 text-sm">
-                      <%= for label <- proposal_labels(proposal.weapon_slugs, @item_name_by_slug) do %>
-                        <li>{label}</li>
-                      <% end %>
-                    </ol>
-                  </div>
-
-                  <div>
-                    <h4 class="mb-2 font-medium">Ranked armors</h4>
-                    <ol class="list-decimal space-y-1 pl-5 text-sm">
-                      <%= for label <- proposal_labels(proposal.armor_slugs, @item_name_by_slug) do %>
-                        <li>{label}</li>
-                      <% end %>
-                    </ol>
-                  </div>
-                </div>
-
-                <div class="mt-5 flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    phx-click="approve_proposal"
-                    phx-value-id={proposal.id}
-                    class="rounded-md bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
-                  >
-                    Approve
-                  </button>
-
-                  <button
-                    type="button"
-                    phx-click="reject_proposal"
-                    phx-value-id={proposal.id}
-                    class="rounded-md border px-4 py-2 hover:bg-zinc-50"
-                  >
-                    Reject
-                  </button>
-                </div>
-              </div>
-            <% end %>
-          </div>
-        <% end %>
-      </section>
-    </div>
+              <% end %>
+            </div>
+          <% end %>
+        </section>
+      </div>
+    </Layouts.app>
     """
   end
 
   defp load_data(socket) do
     items_needing_review =
       CatalogItem
-      |> where([i], i.review_state == "needs_review")
-      |> order_by([i], asc: i.inserted_at, asc: i.name)
+      |> where([item], item.review_state == "needs_review")
+      |> order_by([item], asc: item.inserted_at, asc: item.name)
       |> Repo.all()
 
     pending_proposals =
       CatalogProposal
-      |> where([p], p.status == "pending")
-      |> order_by([p], asc: p.inserted_at)
+      |> where([proposal], proposal.status == "pending")
+      |> order_by([proposal], asc: proposal.inserted_at)
       |> Repo.all()
 
     item_name_by_slug =
@@ -292,8 +357,8 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
           %{}
         else
           CatalogItem
-          |> where([i], i.slug in ^slugs)
-          |> select([i], {i.slug, i.name})
+          |> where([item], item.slug in ^slugs)
+          |> select([item], {item.slug, item.name})
           |> Repo.all()
           |> Map.new()
         end
@@ -302,44 +367,41 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
     assign(socket,
       items_needing_review: items_needing_review,
       pending_proposals: pending_proposals,
-      item_name_by_slug: item_name_by_slug
+      item_name_by_slug: item_name_by_slug,
+      current_manifest_version: Curation.latest_synced_manifest_version()
     )
   end
 
   defp update_review_state(socket, id, review_state, success_message) do
-    case Repo.get(CatalogItem, parse_int(id)) do
+    with {:ok, item_id} <- parse_int(id),
+         %CatalogItem{} = item <- Repo.get(CatalogItem, item_id),
+         {:ok, _item} <- item |> CatalogItem.changeset(%{review_state: review_state}) |> Repo.update() do
+      {:noreply,
+       socket
+       |> put_flash(:info, success_message)
+       |> load_data()}
+    else
+      :error ->
+        {:noreply, put_flash(socket, :error, "Invalid item id.")}
+
       nil ->
         {:noreply, put_flash(socket, :error, "Item not found.")}
 
-      %CatalogItem{} = item ->
-        case item
-             |> CatalogItem.changeset(%{review_state: review_state})
-             |> Repo.update() do
-          {:ok, _item} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, success_message)
-             |> load_data()}
-
-          {:error, _changeset} ->
-            {:noreply, put_flash(socket, :error, "Could not update item state.")}
-        end
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not update item state.")}
     end
   end
 
   defp approve_proposal(%CatalogProposal{} = proposal) do
     slug_to_item_id =
       CatalogItem
-      |> where([i], i.slug in ^(proposal.weapon_slugs ++ proposal.armor_slugs))
-      |> select([i], {i.slug, i.id})
+      |> where([item], item.slug in ^(proposal.weapon_slugs ++ proposal.armor_slugs))
+      |> select([item], {item.slug, item.id})
       |> Repo.all()
       |> Map.new()
 
-    weapon_rankings =
-      build_ranking_attrs(proposal.weapon_slugs, slug_to_item_id, proposal, "weapon")
-
-    armor_rankings =
-      build_ranking_attrs(proposal.armor_slugs, slug_to_item_id, proposal, "armor")
+    weapon_rankings = build_ranking_attrs(proposal.weapon_slugs, slug_to_item_id, proposal, "weapon")
+    armor_rankings = build_ranking_attrs(proposal.armor_slugs, slug_to_item_id, proposal, "armor")
 
     with {:ok, weapon_rankings} <- weapon_rankings,
          {:ok, armor_rankings} <- armor_rankings do
@@ -348,8 +410,8 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
       Multi.new()
       |> Multi.delete_all(
         :delete_existing_rankings,
-        from(r in CatalogRanking,
-          where: r.class == ^proposal.class and r.activity == ^proposal.activity
+        from(ranking in CatalogRanking,
+          where: ranking.class == ^proposal.class and ranking.activity == ^proposal.activity
         )
       )
       |> Multi.insert_all(
@@ -420,6 +482,27 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
     |> Enum.uniq()
   end
 
-  defp parse_int(value) when is_integer(value), do: value
-  defp parse_int(value) when is_binary(value), do: String.to_integer(value)
+  defp parse_activities(nil), do: []
+
+  defp parse_activities(activities_string) do
+    allowed_activities = MapSet.new(Catalog.activities())
+
+    activities_string
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.filter(&MapSet.member?(allowed_activities, &1))
+    |> Enum.uniq()
+  end
+
+  defp parse_int(value) when is_integer(value), do: {:ok, value}
+
+  defp parse_int(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {integer, ""} -> {:ok, integer}
+      _ -> :error
+    end
+  end
+
+  defp parse_int(_value), do: :error
 end

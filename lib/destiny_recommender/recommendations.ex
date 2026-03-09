@@ -3,8 +3,6 @@ defmodule DestinyRecommender.Recommendations do
 
   import Ecto.Query
 
-  alias DestinyRecommender.Repo
-
   alias DestinyRecommender.Recommendations.{
     AIRecommender,
     Catalog,
@@ -12,6 +10,8 @@ defmodule DestinyRecommender.Recommendations do
     CatalogProposal,
     CatalogRanking
   }
+
+  alias DestinyRecommender.Repo
 
   def recommend(class, activity) do
     cond do
@@ -22,10 +22,9 @@ defmodule DestinyRecommender.Recommendations do
         {:error, {:invalid_activity, activity}}
 
       true ->
-        with {:ok, rec} <- AIRecommender.recommend(class, activity) do
-          weapon = Catalog.weapon_by_id(rec.weapon_id)
-          armor = Catalog.armor_by_id(rec.armor_id)
-
+        with {:ok, rec} <- AIRecommender.recommend(class, activity),
+             weapon when not is_nil(weapon) <- Catalog.weapon_by_id(rec.weapon_id),
+             armor when not is_nil(armor) <- Catalog.armor_by_id(rec.armor_id) do
           {:ok,
            %{
              weapon: weapon,
@@ -33,14 +32,17 @@ defmodule DestinyRecommender.Recommendations do
              why: rec.why,
              tips: rec.playstyle_tips
            }}
+        else
+          nil -> {:error, :catalog_lookup_failed}
+          {:error, reason} -> {:error, reason}
         end
     end
   end
 
   def list_items_needing_review do
     CatalogItem
-    |> where([i], i.review_state == "needs_review")
-    |> order_by([i], asc: i.inserted_at, asc: i.name)
+    |> where([item], item.review_state == "needs_review")
+    |> order_by([item], asc: item.inserted_at, asc: item.name)
     |> Repo.all()
   end
 
@@ -67,8 +69,8 @@ defmodule DestinyRecommender.Recommendations do
 
   def list_pending_proposals do
     CatalogProposal
-    |> where([p], p.status == "pending")
-    |> order_by([p], asc: p.inserted_at)
+    |> where([proposal], proposal.status == "pending")
+    |> order_by([proposal], asc: proposal.inserted_at)
     |> Repo.all()
   end
 
@@ -76,8 +78,8 @@ defmodule DestinyRecommender.Recommendations do
     Repo.transaction(fn ->
       slug_to_item_id =
         CatalogItem
-        |> where([i], i.slug in ^(proposal.weapon_slugs ++ proposal.armor_slugs))
-        |> select([i], {i.slug, i.id})
+        |> where([item], item.slug in ^(proposal.weapon_slugs ++ proposal.armor_slugs))
+        |> select([item], {item.slug, item.id})
         |> Repo.all()
         |> Map.new()
 
@@ -90,7 +92,7 @@ defmodule DestinyRecommender.Recommendations do
       now = DateTime.utc_now()
 
       CatalogRanking
-      |> where([r], r.class == ^proposal.class and r.activity == ^proposal.activity)
+      |> where([ranking], ranking.class == ^proposal.class and ranking.activity == ^proposal.activity)
       |> Repo.delete_all()
 
       Repo.insert_all(CatalogRanking, add_timestamps(weapon_rankings, now))

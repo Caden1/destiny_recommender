@@ -1,22 +1,22 @@
 defmodule DestinyRecommender.Workers.ManifestSyncWorker do
+  @moduledoc """
+  Downloads the manifest slice we care about and imports manifest-backed exotics.
+
+  Proposal generation is *not* triggered automatically anymore. The admin review
+  step sits between import and proposal creation so the v3 pipeline stays human-in-the-loop.
+  """
+
   use Oban.Worker, queue: :manifest, max_attempts: 3
 
-  alias DestinyRecommender.Bungie
+  alias DestinyRecommender.Recommendations.{ManifestImporter, ManifestSnapshot}
   alias DestinyRecommender.Repo
-  alias DestinyRecommender.Recommendations.ManifestImporter
-  alias DestinyRecommender.Recommendations.ManifestSnapshot
-  alias DestinyRecommender.Workers.CuratorProposalWorker
-
-  @classes ~w(Warlock Titan Hunter)
-  @activities ~w(Crucible Strike)
 
   @impl true
   def perform(%Oban.Job{args: %{"snapshot_id" => snapshot_id}}) do
     with {:ok, snapshot} <- fetch_snapshot(snapshot_id),
          {:ok, manifest_payload} <- download_inventory_item_definitions(snapshot),
          :ok <- import_filtered_exotics(manifest_payload, snapshot),
-         {:ok, _snapshot} <- mark_snapshot_synced(snapshot, manifest_payload.version),
-         :ok <- enqueue_curator_proposals(manifest_payload.version) do
+         {:ok, _snapshot} <- mark_snapshot_synced(snapshot, manifest_payload.version) do
       :ok
     else
       {:error, reason} ->
@@ -35,7 +35,7 @@ defmodule DestinyRecommender.Workers.ManifestSyncWorker do
   end
 
   defp download_inventory_item_definitions(%ManifestSnapshot{locale: locale} = snapshot) do
-    case Bungie.fetch_inventory_item_definitions(locale) do
+    case bungie_client().fetch_inventory_item_definitions(locale) do
       {:ok, %{version: version, items: _items} = payload} ->
         if snapshot.version == version do
           {:ok, payload}
@@ -67,32 +67,9 @@ defmodule DestinyRecommender.Workers.ManifestSyncWorker do
     |> Repo.update()
   end
 
-  defp enqueue_curator_proposals(manifest_version) do
-    Enum.each(@classes, fn class ->
-      Enum.each(@activities, fn activity ->
-        args = %{
-          "class" => class,
-          "activity" => activity,
-          "manifest_version" => manifest_version
-        }
-
-        CuratorProposalWorker.new(args,
-          unique: [period: 86_400, keys: [:class, :activity, :manifest_version]]
-        )
-        |> Oban.insert!()
-      end)
-    end)
-
-    :ok
-  rescue
-    error -> {:error, {:enqueue_curator_proposals_failed, Exception.message(error)}}
-  end
-
   defp maybe_mark_failed(snapshot_id, reason) do
     case Repo.get(ManifestSnapshot, snapshot_id) do
-      nil ->
-        :ok
-
+      nil -> :ok
       snapshot ->
         snapshot
         |> ManifestSnapshot.changeset(%{
@@ -102,5 +79,9 @@ defmodule DestinyRecommender.Workers.ManifestSyncWorker do
         })
         |> Repo.update()
     end
+  end
+
+  defp bungie_client do
+    Application.get_env(:destiny_recommender, :bungie_client, DestinyRecommender.Bungie)
   end
 end
