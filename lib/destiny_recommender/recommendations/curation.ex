@@ -38,7 +38,11 @@ defmodule DestinyRecommender.Recommendations.Curation do
       Enum.reduce(@classes, 0, fn class, acc ->
         Enum.reduce(@activities, acc, fn activity, inner_acc ->
           args = %{"class" => class, "activity" => activity}
-          args = if is_binary(manifest_version), do: Map.put(args, "manifest_version", manifest_version), else: args
+
+          args =
+            if is_binary(manifest_version),
+              do: Map.put(args, "manifest_version", manifest_version),
+              else: args
 
           {:ok, _job} =
             Oban.insert(

@@ -66,7 +66,9 @@ defmodule DestinyRecommender.Recommendations.ManifestImporter do
   end
 
   defp upsert_item!(attrs) do
-    existing_item = Repo.get_by(CatalogItem, bungie_hash: attrs.bungie_hash) || Repo.get_by(CatalogItem, slug: attrs.slug)
+    existing_item =
+      Repo.get_by(CatalogItem, bungie_hash: attrs.bungie_hash) ||
+        Repo.get_by(CatalogItem, slug: attrs.slug)
 
     case existing_item do
       nil ->

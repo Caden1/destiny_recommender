@@ -20,7 +20,7 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLiveTest do
 
     view
     |> form("#catalog-item-form-#{item.id}", %{
-      "id" => item.id,
+      "_id" => item.id,
       "tags" => "aggressive, dueling",
       "recommended_activities" => "Crucible, Strike",
       "meta_notes" => "Prefer easy-to-use solo picks."

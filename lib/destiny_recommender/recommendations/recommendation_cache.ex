@@ -22,7 +22,8 @@ defmodule DestinyRecommender.Recommendations.RecommendationCache do
   Only successful recommendation results are cached. Errors are returned directly
   so operational issues still surface immediately.
   """
-  def get_or_store(key, fun, ttl_ms \\ @default_ttl_ms) when is_binary(key) and is_function(fun, 0) do
+  def get_or_store(key, fun, ttl_ms \\ @default_ttl_ms)
+      when is_binary(key) and is_function(fun, 0) do
     case get(key) do
       {:ok, value} ->
         :telemetry.execute(
@@ -55,7 +56,9 @@ defmodule DestinyRecommender.Recommendations.RecommendationCache do
     now = System.system_time(:millisecond)
 
     case :ets.lookup(@table, key) do
-      [{^key, value, expires_at}] when expires_at > now -> {:ok, value}
+      [{^key, value, expires_at}] when expires_at > now ->
+        {:ok, value}
+
       [{^key, _value, _expires_at}] ->
         :ets.delete(@table, key)
         :miss

@@ -38,7 +38,15 @@ defmodule DestinyRecommender.Recommendations.ContextPack do
 
   @max_meta_notes_length 180
 
-  @spec new(String.t(), String.t(), list(map()), list(map()), list(String.t()), pos_integer(), pos_integer()) ::
+  @spec new(
+          String.t(),
+          String.t(),
+          list(map()),
+          list(map()),
+          list(String.t()),
+          pos_integer(),
+          pos_integer()
+        ) ::
           t()
   def new(class, activity, weapons, armors, note_bullets, why_max_length, tip_max_length) do
     %__MODULE__{

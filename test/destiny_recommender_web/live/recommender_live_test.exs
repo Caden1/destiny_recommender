@@ -4,7 +4,11 @@ defmodule DestinyRecommenderWeb.RecommenderLiveTest do
   import Phoenix.LiveViewTest
 
   setup do
-    Application.put_env(:destiny_recommender, :openai_client, DestinyRecommender.TestSupport.FakeOpenAI)
+    Application.put_env(
+      :destiny_recommender,
+      :openai_client,
+      DestinyRecommender.TestSupport.FakeOpenAI
+    )
 
     Application.put_env(:destiny_recommender, :fake_openai_response, %{
       "weapon_id" => "ace_of_spades",

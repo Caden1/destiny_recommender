@@ -237,15 +237,32 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
     allowed_armor_slugs = MapSet.new(Enum.map(armor_candidates, & &1["slug"]))
 
     cond do
-      not is_list(weapon_slugs) -> {:error, {:invalid_response_field, :weapon_slugs}}
-      not is_list(armor_slugs) -> {:error, {:invalid_response_field, :armor_slugs}}
-      not is_binary(summary) -> {:error, {:invalid_response_field, :summary}}
-      String.length(summary) > @max_summary_length -> {:error, {:summary_too_long, String.length(summary)}}
-      Enum.uniq(weapon_slugs) != weapon_slugs -> {:error, :duplicate_weapon_slugs}
-      Enum.uniq(armor_slugs) != armor_slugs -> {:error, :duplicate_armor_slugs}
-      Enum.any?(weapon_slugs, &(not MapSet.member?(allowed_weapon_slugs, &1))) -> {:error, :unknown_weapon_slug}
-      Enum.any?(armor_slugs, &(not MapSet.member?(allowed_armor_slugs, &1))) -> {:error, :unknown_armor_slug}
-      true -> :ok
+      not is_list(weapon_slugs) ->
+        {:error, {:invalid_response_field, :weapon_slugs}}
+
+      not is_list(armor_slugs) ->
+        {:error, {:invalid_response_field, :armor_slugs}}
+
+      not is_binary(summary) ->
+        {:error, {:invalid_response_field, :summary}}
+
+      String.length(summary) > @max_summary_length ->
+        {:error, {:summary_too_long, String.length(summary)}}
+
+      Enum.uniq(weapon_slugs) != weapon_slugs ->
+        {:error, :duplicate_weapon_slugs}
+
+      Enum.uniq(armor_slugs) != armor_slugs ->
+        {:error, :duplicate_armor_slugs}
+
+      Enum.any?(weapon_slugs, &(not MapSet.member?(allowed_weapon_slugs, &1))) ->
+        {:error, :unknown_weapon_slug}
+
+      Enum.any?(armor_slugs, &(not MapSet.member?(allowed_armor_slugs, &1))) ->
+        {:error, :unknown_armor_slug}
+
+      true ->
+        :ok
     end
   end
 
@@ -262,7 +279,10 @@ defmodule DestinyRecommender.Recommendations.CuratorAI do
 
   defp ready_candidate?(%{"review_state" => "ready"}), do: true
   defp ready_candidate?(%{"review_state" => _}), do: false
-  defp ready_candidate?(candidate) when is_map(candidate), do: not Map.has_key?(candidate, "review_state")
+
+  defp ready_candidate?(candidate) when is_map(candidate),
+    do: not Map.has_key?(candidate, "review_state")
+
   defp ready_candidate?(_), do: false
 
   defp compact_candidate(candidate) do

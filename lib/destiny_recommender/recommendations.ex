@@ -92,7 +92,10 @@ defmodule DestinyRecommender.Recommendations do
       now = DateTime.utc_now()
 
       CatalogRanking
-      |> where([ranking], ranking.class == ^proposal.class and ranking.activity == ^proposal.activity)
+      |> where(
+        [ranking],
+        ranking.class == ^proposal.class and ranking.activity == ^proposal.activity
+      )
       |> Repo.delete_all()
 
       Repo.insert_all(CatalogRanking, add_timestamps(weapon_rankings, now))

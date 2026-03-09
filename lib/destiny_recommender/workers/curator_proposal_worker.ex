@@ -94,7 +94,8 @@ defmodule DestinyRecommender.Workers.CuratorProposalWorker do
     end
   end
 
-  defp maybe_scope_to_manifest_version(query, manifest_version) when is_binary(manifest_version) do
+  defp maybe_scope_to_manifest_version(query, manifest_version)
+       when is_binary(manifest_version) do
     query
     |> where([item], item.source != "seed")
     |> where([item], item.manifest_version == ^manifest_version or item.source == "manual")

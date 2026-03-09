@@ -69,7 +69,9 @@ defmodule DestinyRecommender.Workers.ManifestSyncWorker do
 
   defp maybe_mark_failed(snapshot_id, reason) do
     case Repo.get(ManifestSnapshot, snapshot_id) do
-      nil -> :ok
+      nil ->
+        :ok
+
       snapshot ->
         snapshot
         |> ManifestSnapshot.changeset(%{

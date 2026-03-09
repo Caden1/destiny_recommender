@@ -16,7 +16,11 @@ defmodule DestinyRecommender.Recommendations.RecommendationTest do
     assert changeset.valid?
     assert {:ok, recommendation} = Ecto.Changeset.apply_action(changeset, :insert)
     assert recommendation.why == "Use \"Ace of Spades\" - it's reliable."
-    assert recommendation.playstyle_tips == ["Take high-percentage duels...", "Disengage when weak."]
+
+    assert recommendation.playstyle_tips == [
+             "Take high-percentage duels...",
+             "Disengage when weak."
+           ]
   end
 
   test "rejects ids that are not present in the candidate list" do

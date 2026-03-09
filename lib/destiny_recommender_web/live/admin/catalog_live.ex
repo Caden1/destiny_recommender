@@ -4,7 +4,15 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias DestinyRecommender.Recommendations.{Catalog, CatalogItem, CatalogProposal, CatalogRanking, Curation}
+
+  alias DestinyRecommender.Recommendations.{
+    Catalog,
+    CatalogItem,
+    CatalogProposal,
+    CatalogRanking,
+    Curation
+  }
+
   alias DestinyRecommender.Repo
 
   @impl true
@@ -28,7 +36,8 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
          |> load_data()}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Could not enqueue curator jobs: #{inspect(reason)}")}
+        {:noreply,
+         put_flash(socket, :error, "Could not enqueue curator jobs: #{inspect(reason)}")}
     end
   end
 
@@ -88,8 +97,7 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
           {:noreply, put_flash(socket, :error, "Could not approve proposal.")}
 
         {:error, reason} ->
-          {:noreply,
-           put_flash(socket, :error, "Could not approve proposal: #{inspect(reason)}")}
+          {:noreply, put_flash(socket, :error, "Could not approve proposal: #{inspect(reason)}")}
       end
     else
       :error ->
@@ -195,7 +203,7 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
                     phx-submit="save_item"
                     class="space-y-4"
                   >
-                    <input type="hidden" name="id" value={item.id} />
+                    <input type="hidden" name="_id" value={item.id} />
 
                     <div>
                       <label class="mb-1 block text-sm font-medium">Current tags</label>
@@ -375,7 +383,8 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
   defp update_review_state(socket, id, review_state, success_message) do
     with {:ok, item_id} <- parse_int(id),
          %CatalogItem{} = item <- Repo.get(CatalogItem, item_id),
-         {:ok, _item} <- item |> CatalogItem.changeset(%{review_state: review_state}) |> Repo.update() do
+         {:ok, _item} <-
+           item |> CatalogItem.changeset(%{review_state: review_state}) |> Repo.update() do
       {:noreply,
        socket
        |> put_flash(:info, success_message)
@@ -400,7 +409,9 @@ defmodule DestinyRecommenderWeb.Admin.CatalogLive do
       |> Repo.all()
       |> Map.new()
 
-    weapon_rankings = build_ranking_attrs(proposal.weapon_slugs, slug_to_item_id, proposal, "weapon")
+    weapon_rankings =
+      build_ranking_attrs(proposal.weapon_slugs, slug_to_item_id, proposal, "weapon")
+
     armor_rankings = build_ranking_attrs(proposal.armor_slugs, slug_to_item_id, proposal, "armor")
 
     with {:ok, weapon_rankings} <- weapon_rankings,

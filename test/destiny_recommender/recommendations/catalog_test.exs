@@ -24,7 +24,9 @@ defmodule DestinyRecommender.Recommendations.CatalogTest do
       catalog_item: weapon
     })
 
-    assert [%{id: "12345", name: weapon.name}] = Catalog.weapons_for("Warlock", "Crucible")
-    assert %{name: weapon.name, slug: "manifest_weapon"} = Catalog.weapon_by_id("12345")
+    weapon_name = weapon.name
+
+    assert [%{id: "12345", name: ^weapon_name}] = Catalog.weapons_for("Warlock", "Crucible")
+    assert %{name: ^weapon_name, slug: "manifest_weapon"} = Catalog.weapon_by_id("12345")
   end
 end
