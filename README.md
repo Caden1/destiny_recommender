@@ -7,7 +7,7 @@ A Phoenix + LiveView web app that recommends exactly **one exotic weapon** and *
 
 The app always assumes the player is **solo**.
 
-For **Crucible**, the goal is to recommend gear that helps the player get the **most kills**.
+For **Crucible**, the goal is to recommend gear that helps the player get the **most points**.
 For **Strike**, the goal is to recommend gear that helps the player finish the activity **as quickly and safely as possible** while solo.
 
 ---
